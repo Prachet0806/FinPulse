@@ -1,36 +1,59 @@
 # scripts/run_decision_engine.py
 
-from ingestion.loader import load_data
-from ingestion.validator import validate_data
-from processing.feature_engineering import build_features
-from intelligence.segmentation.segmenter import segment_customers
-from intelligence.segmentation.segment_labels import label_segments
+import argparse
+import logging
+import sys
+from pathlib import Path
 
-from intelligence.churn.churn_model import train_churn_model
-from intelligence.churn.churn_scoring import score_churn
-from intelligence.clv.clv_model import estimate_clv
-from intelligence.customer_priority import compute_priority
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from decision_engine.apply_strategies import apply_strategies
+from configs.settings import RAW_DATA_PATH, setup_logging, ensure_dirs
+
+logger = logging.getLogger(__name__)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="FinPulse decision engine")
+    p.add_argument("--data-path", default=str(RAW_DATA_PATH))
+    p.add_argument("--log-level", default=None)
+    return p.parse_args()
 
 
 def main():
-    raw_path = "data/raw/Telco-Customer-Churn.csv"
+    args = parse_args()
+    setup_logging(args.log_level)
+    ensure_dirs()
+    from ingestion.loader import load_data
+    from ingestion.validator import validate_data
+    from processing.feature_engineering import build_features
+    from intelligence.segmentation.segmenter import segment_customers
+    from intelligence.segmentation.segment_labels import label_segments
 
-    df = load_data(raw_path)
-    df = validate_data(df)
-    df = build_features(df)
+    from intelligence.churn.churn_model import train_churn_model
+    from intelligence.churn.churn_scoring import score_churn
+    from intelligence.clv.clv_model import estimate_clv
+    from intelligence.customer_priority import compute_priority
 
-    df = segment_customers(df)
-    df = label_segments(df)
+    from decision_engine.apply_strategies import apply_strategies
 
-    model = train_churn_model(df)
-    df = score_churn(model, df)
+    try:
+        df = load_data(args.data_path)
+        df, _, _ = validate_data(df, return_report=True)
+        df = build_features(df)
 
-    df = estimate_clv(df)
-    df = compute_priority(df)
+        df = segment_customers(df)
+        df = label_segments(df)
 
-    df = apply_strategies(df)
+        model = train_churn_model(df)
+        df = score_churn(model, df)
+
+        df = estimate_clv(df)
+        df = compute_priority(df)
+
+        df = apply_strategies(df)
+    except Exception:
+        logger.exception("Fatal decision-engine error")
+        sys.exit(1)
 
     print(df[[
         "segment_label",

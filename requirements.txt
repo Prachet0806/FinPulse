@@ -1,8 +1,11 @@
-pandas
-numpy
-scikit-learn
+pandas==2.3.3
+numpy==2.2.6
+scikit-learn==1.7.1
 matplotlib
 seaborn
-streamlit
+streamlit==1.53.0
 pyyaml
-plotly
+plotly==6.2.0
+pytest
+joblib==1.5.1
+pyarrow==22.0.0

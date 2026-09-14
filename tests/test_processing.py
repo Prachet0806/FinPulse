@@ -15,17 +15,19 @@ def test_fintech_rename_columns():
     assert "lifetime_value" in df_renamed.columns
 
 def test_division_by_zero_fix():
-    """Verify that tenure=0 does not create inf/NaN for avg_revenue."""
+    """Verify that tenure=0 is fail-closed: NaN + flag, never inf."""
     df = pd.DataFrame({
         "account_tenure_months": [0, 10],
         "lifetime_value": [100, 100],
         "monthly_spend": [10, 10]
     })
-    
+
     df_features = create_behavioral_features(df)
-    
-    # Check the tenure=0 case
-    assert df_features.iloc[0]["avg_revenue_per_month"] == 0
+
+    # Check the tenure=0 case: NaN + flagged, not silent 0/inf
+    assert pd.isna(df_features.iloc[0]["avg_revenue_per_month"])
+    assert df_features.iloc[0]["is_zero_tenure"] == 1
+    assert np.isfinite(df_features["avg_revenue_per_month"].dropna()).all()
     # Check regular case
     assert df_features.iloc[1]["avg_revenue_per_month"] == 10
 

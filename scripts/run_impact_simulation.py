@@ -1,44 +1,67 @@
 # scripts/run_impact_simulation.py
 
-from ingestion.loader import load_data
-from ingestion.validator import validate_data
-from processing.feature_engineering import build_features
-from intelligence.segmentation.segmenter import segment_customers
-from intelligence.segmentation.segment_labels import label_segments
+import argparse
+import logging
+import sys
+from pathlib import Path
 
-from intelligence.churn.churn_model import train_churn_model
-from intelligence.churn.churn_scoring import score_churn
-from intelligence.clv.clv_model import estimate_clv
-from intelligence.customer_priority import compute_priority
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from decision_engine.apply_strategies import apply_strategies
+from configs.settings import RAW_DATA_PATH, setup_logging, ensure_dirs
 
-from simulation.impact_simulator import simulate_impact
-from simulation.roi_calculator import compute_roi
-from simulation.strategy_breakdown import strategy_impact_breakdown
+logger = logging.getLogger(__name__)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="FinPulse impact simulation")
+    p.add_argument("--data-path", default=str(RAW_DATA_PATH))
+    p.add_argument("--log-level", default=None)
+    return p.parse_args()
 
 
 def main():
-    raw_path = "data/raw/telco_churn.csv"
+    args = parse_args()
+    setup_logging(args.log_level)
+    ensure_dirs()
+    from ingestion.loader import load_data
+    from ingestion.validator import validate_data
+    from processing.feature_engineering import build_features
+    from intelligence.segmentation.segmenter import segment_customers
+    from intelligence.segmentation.segment_labels import label_segments
 
-    df = load_data(raw_path)
-    df = validate_data(df)
-    df = build_features(df)
+    from intelligence.churn.churn_model import train_churn_model
+    from intelligence.churn.churn_scoring import score_churn
+    from intelligence.clv.clv_model import estimate_clv
+    from intelligence.customer_priority import compute_priority
 
-    df = segment_customers(df)
-    df = label_segments(df)
+    from decision_engine.apply_strategies import apply_strategies
 
-    model = train_churn_model(df)
-    df = score_churn(model, df)
+    from simulation.impact_simulator import simulate_impact
+    from simulation.roi_calculator import compute_roi
+    from simulation.strategy_breakdown import strategy_impact_breakdown
 
-    df = estimate_clv(df)
-    df = compute_priority(df)
+    try:
+        df = load_data(args.data_path)
+        df, _, _ = validate_data(df, return_report=True)
+        df = build_features(df)
 
-    df = apply_strategies(df)
+        df = segment_customers(df)
+        df = label_segments(df)
 
-    impact = simulate_impact(df)
-    roi = compute_roi(impact)
-    breakdown = strategy_impact_breakdown(df)
+        model = train_churn_model(df)
+        df = score_churn(model, df)
+
+        df = estimate_clv(df)
+        df = compute_priority(df)
+
+        df = apply_strategies(df)
+
+        impact = simulate_impact(df)
+        roi = compute_roi(impact)
+        breakdown = strategy_impact_breakdown(df)
+    except Exception:
+        logger.exception("Fatal impact-simulation error")
+        sys.exit(1)
 
     print("\n=== BUSINESS IMPACT ===")
     print(impact)
