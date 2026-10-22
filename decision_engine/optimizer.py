@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from decision_engine.eligibility import apply_eligibility_mask
@@ -27,8 +28,14 @@ def optimize_strategies_vectorized(df: pd.DataFrame) -> pd.DataFrame:
     strategy_costs = {}
 
     # Fail-closed numeric views: unknown churn -> no phantom gain, unknown CLV -> 0
-    churn_gain = pd.to_numeric(df.get("churn_probability"), errors="coerce").fillna(0.0)
-    clv_gain = pd.to_numeric(df.get("estimated_clv"), errors="coerce").fillna(0.0)
+    churn_gain = pd.to_numeric(df.get("churn_probability"), errors="coerce")
+    clv_gain = pd.to_numeric(df.get("estimated_clv"), errors="coerce")
+    valid_money = (
+        churn_gain.between(0, 1) & np.isfinite(churn_gain)
+        & (clv_gain >= 0) & np.isfinite(clv_gain)
+    )
+    churn_gain = churn_gain.where(valid_money, 0.0)
+    clv_gain = clv_gain.where(valid_money, 0.0)
 
     for strategy, params in STRATEGIES.items():
         if strategy == "no_action":

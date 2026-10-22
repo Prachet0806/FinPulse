@@ -60,3 +60,22 @@ def test_allocator_inf_tiebreak_prefers_higher_net():
         settings.MONTHLY_BUDGET = old
     assert summary["total_net_value"] == 900.0
     assert out["recommended_strategy"].iloc[0] == "credit_limit_increase"
+
+
+def test_exact_allocator_beats_density_greedy_when_budget_blocks_larger_gain(monkeypatch):
+    monkeypatch.setattr(settings, "MONTHLY_BUDGET", 100)
+    df = pd.DataFrame({"customerID": ["A", "B"]})
+    nets = {
+        "loan_offer": pd.Series([60.0, float("-inf")]),
+        "fee_waiver": pd.Series([float("-inf"), 100.0]),
+    }
+    costs = {
+        "loan_offer": pd.Series([50.0, 50.0]),
+        "fee_waiver": pd.Series([100.0, 100.0]),
+    }
+    _, greedy = allocate_portfolio(df, nets, costs, method="greedy")
+    chosen, exact = allocate_portfolio(df, nets, costs, method="exact")
+    assert greedy["total_net_value"] == 60.0
+    assert exact["total_net_value"] == 100.0
+    assert exact["method"] == "exact"
+    assert chosen.loc[1, "recommended_strategy"] == "fee_waiver"

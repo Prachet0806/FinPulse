@@ -1,6 +1,8 @@
 # dashboard/app.py
 
 import logging
+import hmac
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -15,19 +17,25 @@ sys.path.append(str(ROOT_DIR))
 
 from configs.settings import setup_logging
 from decision_engine.strategy_library import STRATEGIES
-from pipeline.orchestrator import PipelineOrchestrator
+from pipeline.model_bundle import EVALUATION_PATH, load_bundle
+from simulation.impact_simulator import simulate_impact
 from simulation.roi_calculator import compute_roi
+from simulation.strategy_breakdown import strategy_impact_breakdown
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 # ---------- PIPELINE RUNNER ----------
 
-@st.cache_data(ttl=3600, max_entries=1, show_spinner=True)
 def run_pipeline():
-    orchestrator = PipelineOrchestrator()
-    # Ensure models are saved/loaded properly
-    return orchestrator.run_full_pipeline()
+    bundle = load_bundle()
+    if not EVALUATION_PATH.is_file():
+        raise FileNotFoundError("Evaluation data missing. Run the training pipeline first.")
+    df = pd.read_parquet(EVALUATION_PATH)
+    if "model_run_id" not in df or not (df["model_run_id"] == bundle["metadata"]["run_id"]).all():
+        raise ValueError("Evaluation data and model bundle versions differ")
+    impact = simulate_impact(df)
+    return df, impact, compute_roi(impact), strategy_impact_breakdown(df), bundle["metadata"]
 
 
 # ---------- PAGE CONFIG & STYLING ----------
@@ -38,6 +46,16 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+dashboard_token = os.getenv("FINPULSE_DASHBOARD_TOKEN")
+if not dashboard_token:
+    st.error("Dashboard access is disabled. Configure FINPULSE_DASHBOARD_TOKEN.")
+    st.stop()
+with st.sidebar:
+    supplied_token = st.text_input("Access token", type="password")
+if not hmac.compare_digest(supplied_token, dashboard_token):
+    st.info("Enter the access token to view portfolio data.")
+    st.stop()
 
 # Custom CSS for an "Industry-Grade" aesthetic (sole unsafe_allow_html exception)
 st.markdown("""
@@ -70,7 +88,7 @@ st.markdown("""
 # ---------- UI STRUCTURING ----------
 
 try:
-    df, impact, roi, breakdown = run_pipeline()
+    df, impact, roi, breakdown, metadata = run_pipeline()
 
     # Schema guard (fail-closed: abort UI gracefully if contract broken)
     required = {
@@ -100,8 +118,9 @@ try:
         min_risk = st.slider("Minimum Churn Probability (%)", 0, 100, 0) / 100.0
 
         st.markdown("---")
-        st.markdown("**Platform Status:** 🟢 Online")
+        st.markdown("**Platform Status:** Evaluation snapshot loaded")
         st.markdown(f"**Data Build:** `{len(df):,} records`")
+        st.markdown(f"**Model Run:** `{metadata['run_id'][:12]}`")
 
     # Apply Filters (mask chain, no intermediate copies)
     mask = df["churn_probability"] >= min_risk
@@ -111,37 +130,35 @@ try:
 
     # Main Header (native Streamlit, no unsafe HTML)
     st.title("💳 FinPulse Intelligence")
-    st.subheader("Automated Retention Strategy & Business Impact Simulator")
+    st.subheader("Retention Strategy Scenario Explorer")
+    st.warning("Scenario estimates use unvalidated treatment effects and proxy data. They are not measured retention gains.")
+    st.caption("Random holdout evaluation on a Telco proxy; prediction horizon and real-world treatment effects are not established.")
 
     # ---------- EXECUTIVE METRICS ----------
 
     # Global (unfiltered) metrics straight from the pipeline — now actually used
     st.caption(
-        f"Global net benefit: ${impact.get('net_benefit', 0):,.0f} | "
-        f"Risk-adjusted: ${impact.get('net_risk_adjusted', 0):,.0f} | "
-        f"Global ROI: {roi if roi != float('inf') else 'inf'}"
+        f"Global scenario gross net: ${impact.get('net_benefit', 0):,.0f} | "
+        f"Scenario risk-adjusted net: ${impact.get('net_risk_adjusted', 0):,.0f} | "
+        f"Scenario gross ROI: {roi if roi != float('inf') else 'inf'}"
     )
     with st.expander("Global strategy breakdown"):
-        st.dataframe(breakdown, use_container_width=True)
+        st.dataframe(breakdown, width="stretch")
+    with st.expander("Scenario assumptions"):
+        st.dataframe(
+            pd.DataFrame.from_dict(STRATEGIES, orient="index").reset_index(names="strategy"),
+            width="stretch",
+            hide_index=True,
+        )
 
-    # Recalculate impact based on filters using the shared strategy registry
-    eff_map = {s: p["effectiveness"] for s, p in STRATEGIES.items()}
-    cost_map = {s: p["cost"] for s, p in STRATEGIES.items()}
-
-    f_effectiveness = filtered_df["recommended_strategy"].map(eff_map)
-    f_costs = filtered_df["recommended_strategy"].map(cost_map)
-    f_total_gain = (filtered_df["churn_probability"] * filtered_df["estimated_clv"] * f_effectiveness).sum()
-    f_total_cost = f_costs.sum()
-    f_net_benefit = f_total_gain - f_total_cost
-    f_roi = compute_roi({
-        "total_strategy_cost": float(f_total_cost),
-        "total_retention_gain": float(f_total_gain),
-        "net_benefit": float(f_net_benefit),
-    })
+    f_impact = simulate_impact(filtered_df)
+    f_total_cost = f_impact["total_strategy_cost"]
+    f_net_benefit = f_impact["net_risk_adjusted"]
+    f_roi = (f_net_benefit / f_total_cost) if f_total_cost else None
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Net Retention Benefit", f"${f_net_benefit:,.0f}")
-    col2.metric("Projected ROI", f"{f_roi:.2f}x" if f_roi != float("inf") else "inf")
+    col1.metric("Scenario Risk-Adjusted Net", f"${f_net_benefit:,.0f}")
+    col2.metric("Scenario Risk-Adjusted ROI", f"{f_roi:.2f}x" if f_roi is not None else "N/A")
     col3.metric("Total Strategy Cost", f"${f_total_cost:,.0f}")
     col4.metric("Customers Targeted", f"{len(filtered_df[filtered_df['recommended_strategy'] != 'no_action']):,}")
 
@@ -171,7 +188,7 @@ try:
             legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
             margin=dict(t=20, b=20, l=20, r=20)
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+    st.plotly_chart(fig_donut, width="stretch")
 
     with c2:
         st.header("Strategy Allocation")
@@ -195,7 +212,7 @@ try:
             yaxis=dict(categoryorder="total ascending"),
             margin=dict(t=20, b=20, l=20, r=20)
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
 
     st.header("Risk vs. Value Matrix")
 
@@ -223,11 +240,11 @@ try:
         legend_title="Strategy",
         margin=dict(t=20, b=20, l=20, r=20)
     )
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(fig_scatter, width="stretch")
 
     # ---------- DATA TABLE ----------
 
-    st.header("Intervention Targets")
+    st.header("Scenario Targets")
 
     display_df = filtered_df.sort_values("priority_score", ascending=False).head(100)[[
         "customerID", "segment_label", "churn_probability", "estimated_clv", "priority_score", "recommended_strategy"
@@ -255,7 +272,7 @@ try:
             ),
             "recommended_strategy": "Action"
         },
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 

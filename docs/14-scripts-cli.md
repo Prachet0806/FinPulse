@@ -1,54 +1,17 @@
-# 14 — Scripts & CLI
+# 14 — Scripts and CLI
 
-Sources: `scripts/`
+All commands run from the repository root and accept `--log-level` unless noted.
 
-Thin CLI entrypoints over `PipelineOrchestrator`. Every script:
+| Command | Purpose |
+|---|---|
+| `python scripts/run_pipeline.py --mode train [--data-path PATH]` | Train on labeled data; publish a bundle and held-out evaluation. This is the default CLI mode. |
+| `python scripts/run_pipeline.py --mode inference --data-path PATH` | Score an unlabeled cohort with the stored bundle. |
+| `python scripts/score_customers.py --data-path PATH [--checkpoint-dir PATH]` | Explicit inference command; optionally save scored Parquet output. |
+| `python scripts/run_predictive_intelligence.py` | Print held-out prediction samples after training. |
+| `python scripts/run_decision_engine.py` | Print held-out strategy scenarios after training. |
+| `python scripts/run_impact_simulation.py` | Print held-out aggregate scenario economics after training. |
+| `python scripts/run_ingestion.py` | Inspect loading and validation. |
+| `python scripts/run_feature_engineering.py` | Inspect legacy standalone feature generation. |
+| `python scripts/run_segmentation.py` | Inspect legacy standalone clustering. |
 
-- Appends project root to `sys.path` for local execution.
-- Calls `setup_logging(args.log_level)` + `ensure_dirs()`.
-- Accepts `--data-path` (defaults to canonical `RAW_DATA_PATH`) and
-  `--log-level`; exits non-zero (`sys.exit(1)`) on fatal errors.
-- Requires `PYTHONPATH="."` (or the `sys.path` bootstrap) to resolve
-  top-level packages (`configs`, `pipeline`, ...).
-
-## `run_pipeline.py` — full flow
-
-```bash
-python scripts/run_pipeline.py [--data-path PATH] [--log-level LEVEL]
-```
-
-Runs `run_full_pipeline()`, prints sample of
-`segment_label, churn_probability, estimated_clv, recommended_strategy`.
-
-## Stage scripts
-
-| Script | Calls |
-|--------|-------|
-| `run_ingestion.py` | `load_and_process()` (load + validate + features) |
-| `run_feature_engineering.py` | `load_and_process()` |
-| `run_segmentation.py` | `run_segmentation()` |
-| `run_predictive_intelligence.py` | `run_predictive_intelligence()` |
-| `run_decision_engine.py` | `run_decision_engine()` |
-| `run_impact_simulation.py` | `run_simulation()` |
-
-Each prints/inspects its stage output; see individual script headers for
-exact flags (all share `--data-path` / `--log-level`).
-
-## Common patterns
-
-```bash
-$env:PYTHONPATH="."  # PowerShell
-python scripts/run_pipeline.py --data-path "data/raw/Telco-Customer-Churn.csv" --log-level INFO
-```
-
-```bash
-export PYTHONPATH="."  # Unix/macOS
-python scripts/run_pipeline.py
-```
-
-Override data path without flags:
-
-```bash
-$env:FINPULSE_RAW_PATH="data/raw/custom.csv"
-python scripts/run_pipeline.py
-```
+The last three stage inspectors are demonstration utilities. Production-style training and inference use `pipeline/model_bundle.py`, which fits preprocessing only on the training cohort.

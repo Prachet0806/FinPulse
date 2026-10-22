@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from configs.settings import EPS
@@ -39,7 +40,11 @@ def simulate_impact(df: pd.DataFrame):
     unknown = ~strat.isin(valid_strategies)
     churn = pd.to_numeric(work.get("churn_probability"), errors="coerce")
     clv = pd.to_numeric(work.get("estimated_clv"), errors="coerce")
-    bad = unknown | churn.isna() | clv.isna()
+    bad = (
+        unknown | churn.isna() | clv.isna()
+        | ~np.isfinite(churn) | ~np.isfinite(clv)
+        | ~churn.between(0, 1) | (clv < 0)
+    )
     n_quarantined = int(bad.sum())
     if n_quarantined > 0:
         logger.warning(

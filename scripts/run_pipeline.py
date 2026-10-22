@@ -16,7 +16,11 @@ def parse_args():
     p = argparse.ArgumentParser(description="FinPulse full pipeline")
     p.add_argument("--data-path", default=None)
     p.add_argument("--log-level", default=None)
-    return p.parse_args()
+    p.add_argument("--mode", choices=("train", "inference"), default="train")
+    args = p.parse_args()
+    if args.mode == "inference" and not args.data_path:
+        p.error("--data-path is required for inference")
+    return args
 
 
 def main():
@@ -28,7 +32,7 @@ def main():
         kwargs["data_path"] = args.data_path
     try:
         orchestrator = PipelineOrchestrator(**kwargs)
-        df, _, _, _ = orchestrator.run_full_pipeline()
+        df, _, _, _ = orchestrator.run_full_pipeline(mode=args.mode)
     except Exception:
         logger.exception("Fatal pipeline error")
         sys.exit(1)

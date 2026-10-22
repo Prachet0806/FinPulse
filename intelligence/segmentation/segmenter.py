@@ -46,7 +46,13 @@ def find_optimal_k(X_scaled, min_k=2, max_k=6):
         # Silhouette undefined for single-cluster labelings
         if len(set(labels)) < 2:
             continue
-        score = silhouette_score(X_scaled, labels)
+        try:
+            score = silhouette_score(
+                X_scaled, labels, sample_size=min(n, 2000), random_state=RANDOM_SEED
+            )
+        except ValueError:
+            logger.warning("Skipping silhouette for k=%d: sampled labels are degenerate", k)
+            continue
         logger.info("K=%d, Silhouette Score=%.4f", k, score)
 
         if score > best_score:
@@ -78,6 +84,7 @@ def segment_customers(
     auto_k: bool = True,
     use_stored: bool = False,
     use_robust_scaler: bool = False,
+    return_models: bool = False,
 ) -> pd.DataFrame:
     """
     Segment customers using behavioral and value features.
@@ -97,27 +104,34 @@ def segment_customers(
     if use_stored:
         scaler, kmeans = load_segmentation_models()
         if scaler is not None and kmeans is not None:
+            meta_path = os.path.join(MODELS_DIR, "segmentation_metadata.json")
+            with open(meta_path, encoding="utf-8") as f:
+                stored_medians = json.load(f).get("imputation_medians")
+            if not stored_medians:
+                raise ValueError("Stored segmentation is missing training imputation values")
             X = df[SEGMENT_FEATURES].copy()
             for col in SEGMENT_FEATURES:
                 flag = f"is_{col}_missing"
                 df[flag] = X[col].isna().astype(int)
-                X[col] = X[col].fillna(X[col].median())
+                X[col] = X[col].fillna(stored_medians[col])
             df["segment_id"] = kmeans.predict(scaler.transform(X))
             logger.info("Segmentation applied from stored models.")
-            return df
-        logger.warning("use_stored=True but no stored models; refitting.")
+            return (df, (scaler, kmeans, stored_medians)) if return_models else df
+        raise FileNotFoundError("Stored segmentation models are missing")
 
     if len(df) < 2:
         logger.warning("Too few rows (%d); assigning single segment", len(df))
         df["segment_id"] = 0
-        return df
+        return (df, (None, None, {})) if return_models else df
 
     X = df[SEGMENT_FEATURES].copy()
+    medians = {}
     for col in SEGMENT_FEATURES:
         df[f"is_{col}_missing"] = X[col].isna().astype(int)
         med = X[col].median()
         if pd.isna(med):
             med = 0.0
+        medians[col] = float(med)
         X[col] = X[col].fillna(med)
 
     # Scale features for clustering
@@ -143,7 +157,10 @@ def segment_customers(
         _atomic_dump(kmeans, kmeans_path)
         try:
             sil = (
-                float(silhouette_score(X_scaled, df["segment_id"]))
+                float(silhouette_score(
+                    X_scaled, df["segment_id"],
+                    sample_size=min(len(df), 2000), random_state=RANDOM_SEED,
+                ))
                 if n_clusters > 1
                 else 0.0
             )
@@ -155,6 +172,7 @@ def segment_customers(
             "sklearn_version": sklearn.__version__,
             "scaler": "robust" if use_robust_scaler else "standard",
             "features": SEGMENT_FEATURES,
+            "imputation_medians": medians,
         }
         meta_path = os.path.join(MODELS_DIR, "segmentation_metadata.json")
         fd, tmp = tempfile.mkstemp(dir=MODELS_DIR, suffix=".tmp")
@@ -172,6 +190,23 @@ def segment_customers(
         logger.info("Segmentation models saved to %s", MODELS_DIR)
 
     logger.info("Segmentation complete. Created %d clusters.", n_clusters)
+    return (df, (scaler, kmeans, medians)) if return_models else df
+
+
+def apply_segment_models(df: pd.DataFrame, models: tuple) -> pd.DataFrame:
+    """Apply a fitted scaler, KMeans model, and training medians."""
+    scaler, kmeans, medians = models
+    if scaler is None or kmeans is None:
+        raise ValueError("Segmentation models are missing")
+    df = df.copy()
+    missing = [c for c in SEGMENT_FEATURES if c not in df.columns]
+    if missing:
+        raise ValueError(f"Segmentation missing features: {missing}")
+    X = df[SEGMENT_FEATURES].copy()
+    for col in SEGMENT_FEATURES:
+        df[f"is_{col}_missing"] = X[col].isna().astype(int)
+        X[col] = X[col].fillna(medians[col])
+    df["segment_id"] = kmeans.predict(scaler.transform(X))
     return df
 
 

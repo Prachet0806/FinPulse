@@ -1,11 +1,12 @@
 pandas==2.3.3
 numpy==2.2.6
 scikit-learn==1.7.1
+scipy>=1.8
 matplotlib
 seaborn
-streamlit==1.53.0
+streamlit==1.64.0
 pyyaml
 plotly==6.2.0
 pytest
 joblib==1.5.1
-pyarrow==22.0.0
+pyarrow==23.0.1

@@ -12,17 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_feature_cols(model, df: pd.DataFrame) -> list:
-    """Shared FEATURE_COLS parity: train columns win; else model attr; else numeric fallback."""
+    """Prefer the passed model's schema, then legacy sidecars and fallback."""
     try:
         from intelligence.churn.churn_model import FEATURE_COLS
     except ImportError:
         FEATURE_COLS = None
-    cols = list(FEATURE_COLS) if FEATURE_COLS else None
-    if not cols and hasattr(model, "feature_names_in_"):
+    cols = None
+    if hasattr(model, "feature_names_in_"):
         try:
             cols = list(model.feature_names_in_)
         except TypeError:
             cols = None
+    if not cols:
+        cols = list(FEATURE_COLS) if FEATURE_COLS else None
     if not cols:
         path = os.path.join(MODELS_DIR, "churn_feature_columns.json")
         if os.path.exists(path):
@@ -33,7 +35,7 @@ def _resolve_feature_cols(model, df: pd.DataFrame) -> list:
                 cols = None
     if not cols:
         logger.warning("No saved feature columns; falling back to numeric dtypes")
-        X = df.select_dtypes(include=["int64", "float64", "uint8", "int32", "bool"])
+        X = df.select_dtypes(include=["number", "bool"])
         drop = {"Churn", "churn", "customerID", "segment_id", "segment_label",
                 "churn_probability", "estimated_clv", "priority_score",
                 "retention_gain", "recommended_strategy"}

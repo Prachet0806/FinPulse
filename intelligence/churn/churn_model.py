@@ -6,10 +6,12 @@ import os
 import tempfile
 
 import joblib
+import numpy as np
 import pandas as pd
 from configs.settings import MODELS_DIR, RANDOM_SEED, TEST_SIZE
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
+    brier_score_loss,
     confusion_matrix,
     f1_score,
     precision_score,
@@ -49,7 +51,7 @@ def _build_feature_frame(df: pd.DataFrame):
     else:
         target_col = "Churn"
 
-    X = df.select_dtypes(include=["int64", "float64", "uint8", "int32", "bool"])
+    X = df.select_dtypes(include=[np.number, "bool"]).copy()
     drop = {target_col} | _FEEDBACK_COLS | _ID_COLS
     X = X.drop(columns=[c for c in drop if c in X.columns])
     # Align bools to ints for sklearn stability
@@ -59,7 +61,7 @@ def _build_feature_frame(df: pd.DataFrame):
     return X, target_col
 
 
-def train_churn_model(df: pd.DataFrame, save_model=True):
+def train_churn_model(df: pd.DataFrame, save_model=True, validation_df: pd.DataFrame | None = None):
     """
     Train churn prediction model and optionally save it.
     """
@@ -77,9 +79,18 @@ def train_churn_model(df: pd.DataFrame, save_model=True):
 
     FEATURE_COLS = list(X.columns)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_SEED, stratify=y
-    )
+    if validation_df is None:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=TEST_SIZE, random_state=RANDOM_SEED, stratify=y
+        )
+    else:
+        X_train, y_train = X, y
+        X_test, validation_target = _build_feature_frame(validation_df)
+        X_test = X_test.reindex(columns=FEATURE_COLS, fill_value=0)
+        y_test = validation_df[validation_target].map({"Yes": 1, "No": 0, 1: 1, 0: 0})
+        if bool(y_test.isna().any()):
+            raise ValueError("Validation data contains invalid Churn labels")
+        y_test = y_test.astype(int)
 
     model = RandomForestClassifier(
         random_state=RANDOM_SEED,
@@ -92,15 +103,20 @@ def train_churn_model(df: pd.DataFrame, save_model=True):
     proba = model.predict_proba(X_test)[:, 1]
     pred = (proba >= 0.5).astype(int)
     metrics = {
+        "evaluation_source": "separate_validation_frame" if validation_df is not None else "random_holdout",
         "accuracy": float(model.score(X_test, y_test)),
         "precision": float(precision_score(y_test, pred, zero_division=0)),
         "recall": float(recall_score(y_test, pred, zero_division=0)),
         "f1": float(f1_score(y_test, pred, zero_division=0)),
         "roc_auc": float(roc_auc_score(y_test, proba)) if len(set(y_test)) > 1 else 0.0,
+        "brier_score": float(brier_score_loss(y_test, proba)),
+        "n_train": int(len(X_train)),
+        "n_evaluation": int(len(X_test)),
         "confusion_matrix": confusion_matrix(y_test, pred).tolist(),
         "n_features": int(X.shape[1]),
         "feature_columns": FEATURE_COLS,
     }
+    model.finpulse_metrics_ = metrics
     logger.info(
         "Churn model complete. acc=%.2f prec=%.2f rec=%.2f f1=%.2f auc=%.2f",
         metrics["accuracy"],
@@ -127,11 +143,6 @@ def train_churn_model(df: pd.DataFrame, save_model=True):
             json.dump(metrics, f, indent=2)
         with open(FEATURE_COLS_PATH, "w", encoding="utf-8") as f:
             json.dump(FEATURE_COLS, f)
-        # Attach to model for in-process scoring parity
-        try:
-            model.feature_names_in_ = FEATURE_COLS  # type: ignore[attr-defined]
-        except Exception:
-            pass
         logger.info("Model saved to %s", MODEL_PATH)
 
     return model

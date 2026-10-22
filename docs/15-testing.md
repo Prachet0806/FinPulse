@@ -1,35 +1,7 @@
 # 15 — Testing
 
-Sources: `tests/` — run with `pytest`. CI runs `pytest` + `pip-audit`.
+Run `pytest -q`. CI runs the suite on Python 3.11 and requires `pip-audit` to pass. The audit currently reports Pillow advisories: Streamlit 1.64 requires Pillow below 13, while the reported fixes require Pillow 13. This is an open dependency compatibility blocker, not a waived check.
 
-```bash
-pytest
-pytest tests/test_allocator.py -v
-```
+`tests/test_training_inference_workflow.py` checks unlabeled inference, stable scoring across different batch compositions, non-finite and conflicting input quarantine, and rejection of a mixed model/feature bundle. `tests/test_allocator.py` includes a case where exact assignment beats greedy density selection. Other tests cover the validator, feature engineering, CLV, eligibility, simulator, ROI, and train/score feature parity.
 
-## Coverage map
-
-| Test file | What it locks in |
-|-----------|------------------|
-| `test_ingestion.py` | Loader + validator happy paths |
-| `test_validator_quarantine.py` | Structural quarantine rules, report counts |
-| `test_processing.py` | Fintech rename, 10x scaling idempotency, tenure/engagement features, `tenure_segment_new` presence |
-| `test_segmentation*` (via `conftest.py` fixtures) | Clustering smoke / K-selection |
-| `test_churn_features_parity.py` | Train/serve `FEATURE_COLS` parity, feedback-column exclusion, unseen-category reindex |
-| `test_clv_edges.py` | Fail-closed CLV (NaN churn → 0), denominator floor, non-finite quarantine flag |
-| `test_eligibility_failclosed.py` | NaN/missing gating → `-inf`; missing `tenure_segment_new` disqualifies cashback; `fee_waiver` always eligible |
-| `test_allocator.py` | Budget respected, caps (`max(1, ceil(N*cap))`), ROI-density order, zero budget → all `no_action` |
-| `test_simulator_parity.py` | Simulator gross/net math matches optimizer; quarantine counts; input never mutated |
-
-`conftest.py` provides shared fixtures (sample frames, model artifacts).
-
-## Conventions for new tests
-
-- One behavior per test; name for the rule
-  (e.g. `test_zero_budget_blocks_zero_cost_strategies`).
-- Build minimal DataFrames inline — do not depend on the full raw CSV.
-- Assert fail-closed outcomes explicitly (`-inf`, `no_action`, `0.0`,
-  `n_quarantined`).
-- For economics changes, update both `decision_engine` and `simulation`
-  expectations (parity requirement).
-- Keep tests vectorized and fast; no network, no dashboard run.
+The bundled Telco file has no observation timestamps or treatment outcomes. Tests establish code behavior, not temporal prediction quality, causal effectiveness, production security, or financial validity. Those require representative dated data and deployment-specific checks.
