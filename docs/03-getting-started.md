@@ -1,6 +1,6 @@
 # 03 — Getting started
 
-Install Python 3.10 or newer and dependencies from `requirements.txt`. From the repository root:
+Install Python 3.11 or newer and dependencies from `requirements.txt`. From the repository root:
 
 ```bash
 python -m venv .venv

@@ -38,8 +38,12 @@ def simulate_impact(df: pd.DataFrame):
             "n_quarantined": int(len(work)),
         }
     unknown = ~strat.isin(valid_strategies)
-    churn = pd.to_numeric(work.get("churn_probability"), errors="coerce")
-    clv = pd.to_numeric(work.get("estimated_clv"), errors="coerce")
+    churn = pd.to_numeric(
+        work.get("churn_probability", pd.Series(np.nan, index=work.index)), errors="coerce"
+    )
+    clv = pd.to_numeric(
+        work.get("estimated_clv", pd.Series(np.nan, index=work.index)), errors="coerce"
+    )
     bad = (
         unknown | churn.isna() | clv.isna()
         | ~np.isfinite(churn) | ~np.isfinite(clv)

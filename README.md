@@ -12,7 +12,7 @@ FinPulse is a **demonstration decision-support system** for customer retention. 
 
 ## Setup
 
-Python **3.10+** is required. CI runs Python 3.11.
+Python **3.11+** is required. CI runs Python 3.11.
 
 ```bash
 python -m venv .venv
@@ -47,6 +47,6 @@ The bundled data are cross-sectional, so the 20% stratified holdout provides off
 
 ## Quality and limits
 
-Run `pytest -q` for local checks. CI runs the test suite and `pip-audit` as required gates. As of October 2026, Streamlit 1.64 requires Pillow below 13 while published Pillow advisories require 13 for fixes; the strict dependency gate will remain red until a compatible release or dashboard migration is available. The allocator is exact only for cohorts of at most 200 customers; larger cohorts use a heuristic. K selection samples up to 2,000 rows for silhouette scoring. No million-row performance claim is made without a benchmark.
+Run `pytest -q` for local checks. CI runs the test suite and `pip-audit` as required gates. Streamlit 1.66.1 and Pillow 13 resolve the earlier dependency conflict. The allocator is exact only for cohorts of at most 200 customers; larger cohorts use a heuristic. K selection samples up to 2,000 rows for silhouette scoring. No million-row performance claim is made without a benchmark.
 
 See [the documentation index](docs/README.md) for module details.

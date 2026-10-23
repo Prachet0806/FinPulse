@@ -28,8 +28,12 @@ def optimize_strategies_vectorized(df: pd.DataFrame) -> pd.DataFrame:
     strategy_costs = {}
 
     # Fail-closed numeric views: unknown churn -> no phantom gain, unknown CLV -> 0
-    churn_gain = pd.to_numeric(df.get("churn_probability"), errors="coerce")
-    clv_gain = pd.to_numeric(df.get("estimated_clv"), errors="coerce")
+    churn_gain = pd.to_numeric(
+        df.get("churn_probability", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
+    clv_gain = pd.to_numeric(
+        df.get("estimated_clv", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
     valid_money = (
         churn_gain.between(0, 1) & np.isfinite(churn_gain)
         & (clv_gain >= 0) & np.isfinite(clv_gain)

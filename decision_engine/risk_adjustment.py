@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from configs.settings import RISK_SLOPES
@@ -23,9 +24,13 @@ def calculate_risk_penalty(
       CLV-scaled values are logged when scaling is enabled.
     """
     base_penalty = params.get("risk_penalty", 0.0)
-    churn = pd.to_numeric(df.get("churn_probability"), errors="coerce").fillna(1.0)
-    if bool(churn.isna().any()):
-        logger.warning("Risk quarantine: NaN churn after fill for %s", strategy)
+    raw_churn = pd.to_numeric(
+        df.get("churn_probability", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
+    invalid_churn = ~raw_churn.between(0, 1) | ~np.isfinite(raw_churn)
+    if bool(invalid_churn.any()):
+        logger.warning("Risk quarantine: %d invalid churn values for %s", int(invalid_churn.sum()), strategy)
+    churn = raw_churn.where(~invalid_churn, 1.0)
 
     slope = RISK_SLOPES.get(strategy)
     if strategy == "credit_limit_increase" and slope is not None:
@@ -39,7 +44,10 @@ def calculate_risk_penalty(
     if not use_clv_scaling:
         return flat
 
-    clv = pd.to_numeric(df.get("estimated_clv"), errors="coerce").fillna(0.0)
+    clv = pd.to_numeric(
+        df.get("estimated_clv", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
+    clv = clv.where((clv >= 0) & np.isfinite(clv), 0.0)
     scale = (clv / 1000.0).clip(lower=0)
     scaled = base_penalty + (churn * slope * (1 + scale))
     logger.info(
